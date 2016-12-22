@@ -52,6 +52,12 @@ class Node(object):
         else:
             assert k_id_size == 256
             self.id = big_endian_to_int(sha3(pubkey))
+        self.ping_recv = False
+        self.pong_recv = False
+
+    @property
+    def bonded(self):
+        return self.ping_recv and self.pong_recv
 
     def distance(self, other):
         return self.id ^ other.id
@@ -357,6 +363,8 @@ class KademliaProtocol(object):
         self._expected_pongs = dict()  # pingid -> (timeout, node, replacement_node)
         self._find_requests = dict()  # nodeid -> timeout
         self._deleted_pingids = set()
+        self.waiting_for_ping = []
+        self.waiting_for_pong = []
 
     def bootstrap(self, nodes):
         assert isinstance(nodes, list)
@@ -365,6 +373,14 @@ class KademliaProtocol(object):
                 continue
             self.routing.add_node(node)
             self.find_node(self.this_node.id, via_node=node)
+
+    def bond(self, node):
+        if not node.pong_recv:
+            if not node in self.waiting_for_pong:
+                self.ping(node)
+        elif not node.ping_recv:
+            self.waiting_for_ping.append(node)
+        assert node.bonded
 
     def update(self, node, pingid=None):
         """
@@ -414,6 +430,9 @@ class KademliaProtocol(object):
         if node == self.this_node:
             log.debug('node is self', remoteid=node)
             return
+
+        if not node.bonded:
+            self.bond(node)
 
         def _expected_pongs():
             return set(v[1] for v in self._expected_pongs.values())
@@ -509,6 +528,7 @@ class KademliaProtocol(object):
         log.debug('set wait for pong from', remote=node, local=self.this_node,
                   pingid=pingid.encode('hex')[:4])
         self._expected_pongs[pingid] = (timeout, node, replacement)
+        self.waiting_for_pong.append(node)
 
     def recv_ping(self, remote, echo):
         "udp addresses determined by socket address of revd Ping packets"  # ok
@@ -518,6 +538,9 @@ class KademliaProtocol(object):
         if remote == self.this_node:
             log.warn('recv ping from self?!')
             return
+        remote.ping_recv = True
+        if remote in self.waiting_for_ping:
+            self.waiting_for_ping.remove(remote)
         self.update(remote)
         self.wire.send_pong(remote, echo)
 
@@ -532,6 +555,9 @@ class KademliaProtocol(object):
             if nnodes and nnodes[0] == remote:
                 nnodes[0].address = remote.address  # updated tcp address
         # update rest
+        if remote in self.waiting_for_pong:
+            self.waiting_for_pong.remove(remote)
+        remote.pong_recv = True
         self.update(remote, pingid)
 
     def _query_neighbours(self, targetid):
@@ -587,6 +613,9 @@ class KademliaProtocol(object):
         # FIXME, amplification attack (need to ping pong ping pong first)
         assert isinstance(remote, Node)
         assert isinstance(targetid, long)
+        if not remote.bonded:
+            log.error("remote ping pong not completed")
+            return
         self.update(remote)
         found = self.routing.neighbours(targetid)
         log.debug('recv find_node', remoteid=remote, found=len(found))

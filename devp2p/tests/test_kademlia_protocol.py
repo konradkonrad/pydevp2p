@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 import random
-import time
 from devp2p.utils import int_to_big_endian
 from devp2p import kademlia
 import pytest
@@ -24,7 +23,7 @@ class WireMock(kademlia.WireInterface):
             cls.messages.pop()
 
     def send_ping(self, node):
-        echo = hex(random.randint(0, 2**256))[-32:]
+        echo = hex(random.randint(0, 2 ** 256))[-32:]
         self.messages.append((node, 'ping', self.sender, echo))
         return echo
 
@@ -176,6 +175,8 @@ def test_eviction():
     assert msg[0] == 'ping'
     assert wire.messages == []
     proto.recv_pong(node, msg[2])
+    assert node.pong_recv is True
+    assert not node.bonded
 
     # expect no message and that node is still there
     assert wire.messages == []
@@ -297,6 +298,7 @@ def test_eviction_node_inactive():
 
     # create node to insert
     node = random_node()
+    assert not node.bonded
     node.id = bucket.start + 1  # should not split
     assert bucket.in_range(node)
     assert bucket == proto.routing.bucket_by_node(node)
