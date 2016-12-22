@@ -533,7 +533,7 @@ class KademliaProtocol(object):
             rid = random.randint(bucket.start, bucket.end)
             self.find_node(rid)
 
-    def _expected_pongs(self):
+    def _expected_pong_set(self):
         return set(v[1] for v in self._expected_pongs.values())
 
     def _process_surprising_pong(self, node, pingid):
@@ -544,7 +544,7 @@ class KademliaProtocol(object):
         """
         assert pingid not in self._expected_pongs
         log.debug('surprising pong', remoteid=node,
-                    expected=self._expected_pongs(), pingid=pingid.encode('hex')[:8])
+                    expected=self._expected_pong_set(), pingid=pingid.encode('hex')[:8])
         if pingid in self._deleted_pingids:
             log.debug('surprising pong was deleted')
         else:
