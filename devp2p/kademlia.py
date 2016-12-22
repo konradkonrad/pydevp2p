@@ -411,12 +411,61 @@ class KademliaProtocol(object):
         log.debug('in update', remoteid=node, localid=self.this_node)
 
         # check node is not self
+        if node == self.this_node:
+            log.debug('node is self', remoteid=node)
+            return
+
+        if not node.bonded:
+            self.bond(node)
+            # FIXME: should we return here?
+            return
+
+        # handle a pong
+        if pingid:
+            skip = self.handle_pong(node, pingid)
+            if skip:
+                return
+
+        # add node
+        self._add_or_queue_eviction_test(node)
+
+        # trigger updates
+        self.periodic_updates()
+
+        log.debug('updated', num_nodes=len(self.routing), num_buckets=len(self.routing.buckets))
+
+    def handle_pong(self, node, pingid):
+        """Check the pong with `pingid` against state queues and handle
+        correspondingly.
 
         # if ping was expected
             # if it is not timed out
                 # add to bucket
                     # optinally set replacement
 
+        Args:
+            node: the current node in scope
+            pingid: the pingid of the received (pong) message
+        Return:
+            skip (boolean): should we skip further processing
+        """
+        skip = False
+
+        # check for surprising pong
+        if pingid and (pingid not in self._expected_pongs):
+            skip = True
+            self._process_surprising_pong(node, pingid)
+
+        # check for timed out ping (skip if node in scope timed out)
+        skip = skip or self._check_timed_out_pings(node)
+
+        # if we had registered this node for eviction test
+        if pingid and (pingid in self._expected_pongs):
+            skip or self._handle_eviction_test_ping(node, pingid)
+        return skip
+
+    def periodic_updates(self):
+        """Trigger all updates that are not dependent on the current node in scope.
         # check for not full buckets
             # ping nodes from replacement cache
 
@@ -427,27 +476,7 @@ class KademliaProtocol(object):
 
         # prune timed out expected_ping list
             # ping replacements
-
-        if node == self.this_node:
-            log.debug('node is self', remoteid=node)
-            return
-
-        if not node.bonded:
-            self.bond(node)
-
-        if pingid and (pingid not in self._expected_pongs):
-            return self._process_surprising_pong(node, pingid)
-
-        if self._check_timed_out_pings(node):
-            # prevent node from being added later
-            return
-
-        # if we had registered this node for eviction test
-        if pingid and (pingid in self._expected_pongs):
-            self._handle_eviction_test_ping(node, pingid)
-
-        # add node
-        self._add_or_queue_eviction_test(node)
+        """
 
         # check for not full buckets and ping replacements
         self._ping_potential_replacements()
@@ -457,8 +486,6 @@ class KademliaProtocol(object):
 
         # check and remove timedout find requests
         self._check_and_remove_timed_out_find_requests()
-
-        log.debug('updated', num_nodes=len(self.routing), num_buckets=len(self.routing.buckets))
 
     def _add_or_queue_eviction_test(self, node):
         """Try to add the node. If routing proposes an eviction candidate instead,
