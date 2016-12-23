@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 import random
-import time
 from devp2p.utils import int_to_big_endian
 from devp2p import kademlia
 import pytest
@@ -108,6 +107,8 @@ def test_bootstrap(proto):
     # lookup self
     proto.bootstrap(nodes=[other.this_node])
     msg = wire.poll(other.this_node)
+    assert msg[:2] == ('ping', proto.routing.this_node)
+    msg = wire.poll(other.this_node)
     assert msg == ('find_node', proto.routing.this_node, proto.routing.this_node.id)
     assert wire.poll(other.this_node) is None
     assert wire.messages == []
@@ -123,6 +124,8 @@ def test_setup(proto):
 
     # lookup self
     proto.bootstrap(nodes=[other.this_node])
+    msg = wire.poll(other.this_node)
+    assert msg[:2] == ('ping', proto.routing.this_node)
     msg = wire.poll(other.this_node)
     assert msg == ('find_node', proto.routing.this_node, proto.routing.this_node.id)
     assert wire.poll(other.this_node) is None
@@ -477,7 +480,6 @@ def test_two(proto):
         assert m[1] == 'ping'
 
 
-@pytest.mark.skip
 @pytest.mark.parametrize('num_nodes', [17])
 def test_many(proto):
     assert num_nodes >= kademlia.k_bucket_size + 1
@@ -486,12 +488,14 @@ def test_many(proto):
     wire = bootstrap.wire
 
     # bootstrap
-    for p in protos[1:]:
+    for num, p in enumerate(protos[1:]):
+        print("bootstrapping {i} {node}".format(i=num, node=p.this_node))
         p.bootstrap([bootstrap.this_node])
         wire.process(protos)  # successively add nodes
 
     # now everbody does a find node to fill the buckets
     for p in protos[1:]:
+        # TODO: shouldn't this be `p.find_node(random_node())` ?
         p.find_node(p.this_node.id)
         wire.process(protos)  # can all send in parallel
 

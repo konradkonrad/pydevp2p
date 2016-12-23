@@ -371,10 +371,12 @@ class KademliaProtocol(object):
         for node in nodes:
             if node == self.this_node:
                 continue
+            self.bond(node)
             self.routing.add_node(node)
             self.find_node(self.this_node.id, via_node=node)
 
     def bond(self, node):
+        log.debug("bond called", local=self.this_node, remote=node)
         if not node.pong_recv:
             if not node in self.waiting_for_pong:
                 self.ping(node)
