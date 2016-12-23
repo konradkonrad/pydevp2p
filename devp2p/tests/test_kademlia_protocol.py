@@ -82,12 +82,24 @@ def routing_table(num_nodes=1000):
     return routing
 
 
+@pytest.fixture(scope="function", params=[1])
+def num_nodes(request):
+    """Fixture for the number of nodes returned by fixture `proto`.
+    """
+    return request.param
+
+
 @pytest.fixture(scope="function")
-def proto(request):
-    this_node = random_node()
-    proto = kademlia.KademliaProtocol(this_node, WireMock(this_node))
-    request.addfinalizer(proto.wire.empty)
-    return proto
+def proto(request, num_nodes):
+    """Create `num_nodes` KademliaProtocol instances with `WireMock` attached.
+    """
+    protocols = []
+    for i in range(num_nodes):
+        this_node = random_node()
+        proto = kademlia.KademliaProtocol(this_node, WireMock(this_node))
+        request.addfinalizer(proto.wire.empty)
+        protocols.append(proto)
+    return protocols[0] if num_nodes == 1 else protocols
 
 
 def test_bootstrap(proto):
@@ -136,7 +148,7 @@ def test_setup(proto):
 
 
 @pytest.mark.timeout(5)
-@pytest.mark.xfail
+@pytest.mark.xfail(reason="unsure")
 def test_find_node_timeout(proto):
     other = routing_table()
     wire = proto.wire
@@ -160,7 +172,6 @@ def test_find_node_timeout(proto):
     msg = wire.poll(closest[0])
     assert msg[0] == 'ping'
     assert wire.poll(closest[0]) is None
-    wire.empty()
     assert wire.messages == []
 
 
@@ -418,33 +429,38 @@ def test_eviction_node_split(proto):
     assert eviction_candidate == bucket.head
 
 
-@pytest.mark.xfail(reason="ping is not sufficent!")
-def test_ping_adds_sender(proto):
+def test_ping_not_sufficient_to_add(proto):
     assert len(proto.routing) == 0
     for i in range(10):
         n = random_node()
         proto.recv_ping(n, 'some id %d' % i)
-        assert len(proto.routing) == i + 1
-    proto.wire.empty()
+        assert n.ping_recv
+        assert len(proto.routing) == 0
 
 
-@pytest.mark.xfail(reason="test not finished")
 def test_ping_pong_adds_sender(proto):
     assert len(proto.routing) == 0
     for i in range(10):
         n = random_node()
-        proto.recv_ping(n, 'some id %d' % i)
-        proto._expected_pongs['some id %d' % i] = (time.time() + 1000, n, None)
-        proto.recv_pong(n, 'some id %d' % i)
+        echo = hex(random.randint(0, 2 ** 256))[-32:]
+        pingid = proto._mkpingid(echo, n)
+        proto.recv_ping(n, pingid)
+        proto.ping(n)
+
+        pongid = filter(
+            lambda exp: exp[1][1] == n,
+            proto._expected_pongs.items()
+                )[0][0][:32]
+
+        proto.recv_pong(n, pongid)
+        assert n.bonded
         assert len(proto.routing) == i + 1
-    proto.wire.empty()
 
 
-@pytest.mark.skip
-def test_two():
-    one = proto()
+@pytest.mark.parametrize('num_nodes', [2])
+def test_two(proto):
+    one, two = proto
     one.routing = routing_table(100)
-    two = proto()
     wire = one.wire
     assert one.this_node != two.this_node
     two.ping(one.this_node)
@@ -459,16 +475,13 @@ def test_two():
     assert msg[1] == 'find_node'
     for m in wire.messages[kademlia.k_find_concurrency:]:
         assert m[1] == 'ping'
-    wire.empty()
 
 
 @pytest.mark.skip
-def test_many(num_nodes=17):
-    WireMock.empty()
+@pytest.mark.parametrize('num_nodes', [17])
+def test_many(proto):
     assert num_nodes >= kademlia.k_bucket_size + 1
-    protos = []
-    for i in range(num_nodes):
-        protos.append(proto())
+    protos = proto
     bootstrap = protos[0]
     wire = bootstrap.wire
 
@@ -490,12 +503,13 @@ def test_many(num_nodes=17):
 
 
 @pytest.mark.skip
-def test_find_closest(num_nodes=50):
+@pytest.mark.parametrize('num_nodes', [50])
+def test_find_closest(proto):
     """
     assert, that nodes find really the closest of all nodes
     """
     num_tests = 10
-    protos = test_many(num_nodes)
+    protos = proto
     all_nodes = [p.this_node for p in protos]
     for i, p in enumerate(protos[:num_tests]):
         for j, node in enumerate(all_nodes):

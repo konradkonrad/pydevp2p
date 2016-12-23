@@ -452,7 +452,7 @@ class KademliaProtocol(object):
         skip = False
 
         # check for surprising pong
-        if pingid and (pingid not in self._expected_pongs):
+        if pingid and (pingid not in self._expected_pongs.keys()):
             skip = True
             self._process_surprising_pong(node, pingid)
 
@@ -460,7 +460,7 @@ class KademliaProtocol(object):
         skip = skip or self._check_timed_out_pings(node)
 
         # if we had registered this node for eviction test
-        if pingid and (pingid in self._expected_pongs):
+        if pingid and (pingid in self._expected_pongs.keys()):
             skip or self._handle_eviction_test_ping(node, pingid)
         return skip
 
@@ -533,7 +533,9 @@ class KademliaProtocol(object):
             rid = random.randint(bucket.start, bucket.end)
             self.find_node(rid)
 
-    def _expected_pong_set(self):
+    def _expected_pongs_from(self):
+        """Collect the set of nodes we're expecting a pong from.
+        """
         return set(v[1] for v in self._expected_pongs.values())
 
     def _process_surprising_pong(self, node, pingid):
@@ -542,9 +544,16 @@ class KademliaProtocol(object):
             node: the node in scope
             pingid: the pingid
         """
-        assert pingid not in self._expected_pongs
+        assert pingid not in self._expected_pongs.keys()
         log.debug('surprising pong', remoteid=node,
-                    expected=self._expected_pong_set(), pingid=pingid.encode('hex')[:8])
+                    expected=self._expected_pongs_from(),
+                    pingid=pingid.encode('hex')[:8])
+        if node in self._expected_pongs_from():
+            log.debug("expected pingids for remote", pingids=[
+                pid[0].encode('hex')[:8] for pid in filter(
+                    lambda item: item[1][1] == node,
+                    self._expected_pongs.items())
+                ])
         if pingid in self._deleted_pingids:
             log.debug('surprising pong was deleted')
         else:
@@ -586,8 +595,11 @@ class KademliaProtocol(object):
 
     def _mkpingid(self, echoed, node):
         assert node.pubkey
+        assert len(node.pubkey) == 64
+        assert len(echoed) == 32
         pid = echoed + node.pubkey
         log.debug('mkpingid', echoed=echoed.encode('hex'), node=node.pubkey.encode('hex'))
+        assert len(pid) == 96
         return pid
 
     def ping(self, node, replacement=None):
