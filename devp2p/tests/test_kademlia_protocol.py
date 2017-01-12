@@ -103,7 +103,7 @@ def num_nodes(request):
 
 
 @pytest.fixture(scope="function")
-def proto(request, num_nodes):
+def protos(request, num_nodes):
     """Create `num_nodes` KademliaProtocol instances with `WireMock` attached.
     """
     protocols = []
@@ -112,20 +112,42 @@ def proto(request, num_nodes):
         proto = kademlia.KademliaProtocol(this_node, WireMock(this_node))
         request.addfinalizer(proto.wire.empty)
         protocols.append(proto)
-    return protocols[0] if num_nodes == 1 else protocols
+    return protocols
 
 
-def test_bootstrap(proto):
+@pytest.fixture(scope="function")
+@pytest.mark.parametrize('num_nodes', [1])
+def proto(request, protos):
+    return protos[0]
+
+
+@pytest.mark.parametrize('num_nodes', [2])
+def test_bootstrap(protos):
+    proto = protos[0]
     wire = proto.wire
-    other = routing_table()
+    other = protos[1]
     # lookup self
     proto.bootstrap(nodes=[other.this_node])
-    msg = wire.poll(other.this_node)
+    # bootstrap should initiate bonding
+    msg = wire.process_single(other.this_node, protos)
     assert msg[:2] == ('ping', proto.routing.this_node)
-    msg = wire.poll(other.this_node)
+    # bonding should be followed up by find_node
+    # FIXME: find_node must be delayed until bonding succeeded!
+    msg = wire.process_single(other.this_node, protos)
     assert msg == ('find_node', proto.routing.this_node, proto.routing.this_node.id)
-    assert wire.poll(other.this_node) is None
+    assert wire.process_single(other.this_node, protos) is None
+
+    # bonding is not completed
+    from_routing = proto.routing.get_node(other.this_node)
+    assert not from_routing.bonded
+
+    # After the remote follows protocol bonding will succeed
+    wire.process(protos)
     assert wire.messages == []
+    # After bootstrap the node should be in routing and bonded
+    assert other.this_node in proto.routing
+    from_routing = proto.routing.get_node(other.this_node)
+    assert from_routing.bonded
 
 
 def test_setup(proto):
@@ -475,8 +497,8 @@ def test_ping_pong_adds_sender(proto):
 
 
 @pytest.mark.parametrize('num_nodes', [2])
-def test_two(proto):
-    one, two = proto
+def test_two(protos):
+    one, two = protos
     one.routing = routing_table(100)
     wire = one.wire
     assert one.this_node != two.this_node
@@ -495,9 +517,8 @@ def test_two(proto):
 
 
 @pytest.mark.parametrize('num_nodes', [17])
-def test_many(proto):
+def test_many(protos):
     assert num_nodes >= kademlia.k_bucket_size + 1
-    protos = proto
     bootstrap = protos[0]
     wire = bootstrap.wire
 
@@ -509,7 +530,6 @@ def test_many(proto):
 
     # now everbody does a find node to fill the buckets
     for p in protos[1:]:
-        # TODO: shouldn't this be `p.find_node(random_node())` ?
         p.find_node(p.this_node.id)
         wire.process(protos)  # can all send in parallel
 
@@ -522,12 +542,11 @@ def test_many(proto):
 
 @pytest.mark.skip
 @pytest.mark.parametrize('num_nodes', [50])
-def test_find_closest(proto):
+def test_find_closest(protos):
     """
     assert, that nodes find really the closest of all nodes
     """
     num_tests = 10
-    protos = proto
     all_nodes = [p.this_node for p in protos]
     for i, p in enumerate(protos[:num_tests]):
         for j, node in enumerate(all_nodes):
