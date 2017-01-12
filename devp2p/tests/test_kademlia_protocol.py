@@ -42,6 +42,20 @@ class WireMock(kademlia.WireInterface):
                 del self.messages[i]
                 return x[1:]
 
+    def process_single(self, node, kademlia_protocols):
+        msg = None
+        for i, x in enumerate(self.messages):
+            if x[0] == node:
+                msg = x
+                del self.messages[i]
+                break
+        if msg:
+            proto_by_node = dict((p.this_node, p) for p in kademlia_protocols)
+            target = proto_by_node[msg[0]]
+            cmd = 'recv_' + msg[1]
+            getattr(target, cmd)(*msg[2:])
+            return msg[1:]
+
     def process(self, kademlia_protocols, steps=0):
         """
         process messages until none are left
