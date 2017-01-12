@@ -207,6 +207,15 @@ class KBucket(object):
                 return i - 1
         raise Exception
 
+    def get_node(self, node):
+        if node in self:
+            for n in self.nodes:
+                if n.id == node.id:
+                    return node
+            # should never happen
+            assert False
+        return None
+
     def __contains__(self, node):
         return node in self.nodes
 
@@ -270,6 +279,9 @@ class RoutingTable(object):
     def buckets_by_distance(self, node):
         assert isinstance(node, Node)
         return self.buckets_by_id_distance(node.id)
+
+    def get_node(self, node):
+        return self.bucket_by_node(node).get_node(node)
 
     def __contains__(self, node):
         return node in self.bucket_by_node(node)
