@@ -215,11 +215,19 @@ def test_setup(proto):
 
 
 @pytest.mark.timeout(5)
-@pytest.mark.xfail(reason="unsure")
 def test_find_node_timeout(proto):
     other = routing_table()
     wire = proto.wire
+    assert wire.messages == []
 
+    # mock bonding
+    proto.this_node.ping_recv = True
+    proto.this_node.pong_recv = True
+    other.this_node.ping_recv = True
+    other.this_node.pong_recv = True
+    for node in other:
+        node.ping_recv = True
+        node.pong_recv = True
     # lookup self
     proto.bootstrap(nodes=[other.this_node])
     msg = wire.poll(other.this_node)
@@ -230,16 +238,19 @@ def test_find_node_timeout(proto):
     # do timeout
     gevent.sleep(kademlia.k_request_timeout)
 
+    # TODO: what should have timed out here?
+
     # respond with neighbours
     closest = other.neighbours(msg[2])
     assert len(closest) == kademlia.k_bucket_size
     proto.recv_neighbours(random_node(), closest)
 
     # expect pings, but no other lookup
-    msg = wire.poll(closest[0])
-    assert msg[0] == 'ping'
-    assert wire.poll(closest[0]) is None
-    assert wire.messages == []
+    for n in closest:
+        assert n.bonded
+        msg = wire.poll(n)
+        assert msg[0] == 'ping'
+        assert wire.poll(n) is None
 
 
 def test_eviction(proto):
