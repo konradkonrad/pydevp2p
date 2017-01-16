@@ -589,7 +589,6 @@ def test_many(protos):
     return protos
 
 
-@pytest.mark.skip
 @pytest.mark.parametrize('num_nodes', [50])
 def test_find_closest(protos):
     """
@@ -597,10 +596,18 @@ def test_find_closest(protos):
     """
     num_tests = 10
     all_nodes = [p.this_node for p in protos]
+    # manually bond
+    for node in all_nodes:
+            node.ping_recv = True
+            node.pong_recv = True
+            assert node.bonded
     for i, p in enumerate(protos[:num_tests]):
         for j, node in enumerate(all_nodes):
+            assert p.this_node.bonded
+            assert node.bonded
             if p.this_node == node:
                 continue
+            p.routing.add_node(node)
             p.find_node(node.id)
             p.wire.process(protos)
             assert p.routing.neighbours(node)[0] == node
