@@ -18,6 +18,7 @@ import operator
 import random
 import time
 from functools import total_ordering
+from collections import defaultdict
 
 import slogging
 from crypto import sha3
@@ -377,6 +378,7 @@ class KademliaProtocol(object):
         self._deleted_pingids = set()
         self.waiting_for_ping = []
         self.waiting_for_pong = []
+        self.delayed_messages = defaultdict(list)
 
     def bootstrap(self, nodes):
         assert isinstance(nodes, list)
@@ -396,6 +398,7 @@ class KademliaProtocol(object):
             self.waiting_for_ping.append(node)
         else:
             assert node.bonded
+            assert self.routing.get_node(node).bonded
 
     def update(self, node, pingid=None):
         """
@@ -433,6 +436,13 @@ class KademliaProtocol(object):
             self.bond(node)
             # FIXME: should we return here?
             return
+        else:
+            if node in self.delayed_messages:
+                for message in self.delayed_messages.pop(node):
+                    if message[0] == 'find_node':
+                        self.wire.send_find_node(*message[1:])
+                    elif message[0] == 'neighbours':
+                        self.wire.send_neighbours(*message[1:])
 
         # handle a pong
         if pingid:
@@ -666,7 +676,10 @@ class KademliaProtocol(object):
 
     def _query_neighbours(self, targetid):
         for n in self.routing.neighbours(targetid)[:k_find_concurrency]:
-            self.wire.send_find_node(n, targetid)
+            if n.bonded:
+                self.wire.send_find_node(n, targetid)
+            else:
+                self.delayed_messages[n].append(('find_node', n, targetid))
 
     def find_node(self, targetid, via_node=None):
         # FIXME, amplification attack (need to ping pong ping pong first)
@@ -674,7 +687,12 @@ class KademliaProtocol(object):
         assert not via_node or isinstance(via_node, Node)
         self._find_requests[targetid] = time.time() + k_request_timeout
         if via_node:
-            self.wire.send_find_node(via_node, targetid)
+            if not via_node.bonded:
+                log.debug('via_node not yet bonded', local=self.this_node, remote=via_node)
+                self.bond(via_node)
+                self.delayed_messages[via_node].append(('find_node', via_node, targetid))
+            else:
+                self.wire.send_find_node(via_node, targetid)
         else:
             self._query_neighbours(targetid)
         # FIXME, should we return the closest node (allow callbacks on find_request)
