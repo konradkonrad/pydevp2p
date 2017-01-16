@@ -176,6 +176,13 @@ def test_setup(proto):
     proto.bootstrap(nodes=[other.this_node])
     msg = wire.poll(other.this_node)
     assert msg[:2] == ('ping', proto.routing.this_node)
+    # manually fix bonding
+    proto.routing.get_node(other.this_node).ping_recv = True
+    proto.routing.get_node(other.this_node).pong_recv = True
+    assert other.this_node.bonded
+    # trigger delayed find_node msg
+    proto.update(other.this_node)
+    # now find_node should be on wire
     msg = wire.poll(other.this_node)
     assert msg == ('find_node', proto.routing.this_node, proto.routing.this_node.id)
     assert wire.poll(other.this_node) is None
