@@ -398,7 +398,8 @@ class KademliaProtocol(object):
             self.waiting_for_ping.append(node)
         else:
             assert node.bonded
-            assert self.routing.get_node(node).bonded
+            if node in self.routing:
+                assert self.routing.get_node(node).bonded
 
     def update(self, node, pingid=None):
         """
