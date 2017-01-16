@@ -135,22 +135,33 @@ def test_bootstrap(protos):
     msg = wire.process_single(other.this_node, protos)
     assert msg[:2] == ('ping', proto.routing.this_node)
     # bonding should be followed up by find_node
-    # FIXME: find_node must be delayed until bonding succeeded!
+    # find_node must be delayed until bonding succeeded!
+
     msg = wire.process_single(other.this_node, protos)
-    assert msg == ('find_node', proto.routing.this_node, proto.routing.this_node.id)
+    assert msg is None
+
+    # let bonding proceed
+    messages = list(wire.process(protos, steps=3))
+    # ping, pong, ping(consumed), pong
+    assert [m[0] for m in messages] == ['ping', 'pong', 'pong']
+    assert proto.routing.get_node(other.this_node).bonded
+
+    assert wire.process_single(other.this_node, protos) == ('find_node', proto.routing.this_node, proto.routing.this_node.id)
+    assert len(wire.messages)
+    # nothing left to be done from other
     assert wire.process_single(other.this_node, protos) is None
 
-    # bonding is not completed
-    from_routing = proto.routing.get_node(other.this_node)
-    assert not from_routing.bonded
-
-    # After the remote follows protocol bonding will succeed
-    wire.process(protos)
+    messages = list(wire.process(protos))
     assert wire.messages == []
-    # After bootstrap the node should be in routing and bonded
+
+    assert len(messages)
+    assert messages[0] == ('neighbours', other.this_node, [proto.this_node])
+    # After bootstrap each node should be in others routing and bonded
     assert other.this_node in proto.routing
-    from_routing = proto.routing.get_node(other.this_node)
-    assert from_routing.bonded
+    assert proto.routing.get_node(other.this_node).bonded
+
+    assert proto.this_node in other.routing
+    assert other.routing.get_node(proto.this_node).bonded
 
 
 def test_setup(proto):
