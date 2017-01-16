@@ -43,6 +43,9 @@ class WireMock(kademlia.WireInterface):
                 return x[1:]
 
     def process_single(self, node, kademlia_protocols):
+        """Process a single message for `node`.
+        This is like `poll` but also processes the message on protocol.
+        """
         msg = None
         for i, x in enumerate(self.messages):
             if x[0] == node:
@@ -56,15 +59,16 @@ class WireMock(kademlia.WireInterface):
             getattr(target, cmd)(*msg[2:])
             return msg[1:]
 
-    def process(self, kademlia_protocols, steps=0):
+    def process(self, kademlia_protocols, steps=0, collect=False):
         """
         process messages until none are left
         or if process steps messages if steps >0
 
-        also yields all messages for asserting
+        if collect is True: also returns all processed messages
         """
         i = 0
         proto_by_node = dict((p.this_node, p) for p in kademlia_protocols)
+        collector = []
         while self.messages:
             msg = self.messages.pop(0)
             assert isinstance(msg[2], kademlia.Node)
@@ -72,10 +76,13 @@ class WireMock(kademlia.WireInterface):
             cmd = 'recv_' + msg[1]
             getattr(target, cmd)(*msg[2:])
             i += 1
-            yield msg[1:]
+            if collect:
+                collector.append(msg[1:])
             if steps and i == steps:
-                return  # messages may be left
+                # messages may remain
+                return collector if collect else None
         assert not self.messages
+        return collector if collect else None
 
 
 def random_pubkey():
@@ -141,7 +148,7 @@ def test_bootstrap(protos):
     assert msg is None
 
     # let bonding proceed
-    messages = list(wire.process(protos, steps=3))
+    messages = wire.process(protos, steps=3, collect=True)
     # ping, pong, ping(consumed), pong
     assert [m[0] for m in messages] == ['ping', 'pong', 'pong']
     assert proto.routing.get_node(other.this_node).bonded
@@ -151,7 +158,7 @@ def test_bootstrap(protos):
     # nothing left to be done from other
     assert wire.process_single(other.this_node, protos) is None
 
-    messages = list(wire.process(protos))
+    messages = wire.process(protos, collect=True)
     assert wire.messages == []
 
     assert len(messages)
@@ -525,11 +532,19 @@ def test_two(protos):
     assert one.this_node != two.this_node
     two.ping(one.this_node)
     # print 'messages', wire.messages
-    wire.process([one, two])
+    messages = wire.process([one, two], collect=True)
+
+    assert [m[0] for m in messages] == ['ping', 'ping', 'pong', 'pong']
+    assert two.routing.get_node(one.this_node).bonded
+    assert one.routing.get_node(two.this_node).bonded
+
     two.find_node(two.this_node.id)
     # print 'messages', wire.messages
-    msg = wire.process([one, two], steps=2)
+    messages = wire.process([one, two], steps=2, collect=True)
     # print 'messages', wire.messages
+    assert len(two.delayed_messages[one.this_node]) == 0
+    assert len(one.delayed_messages[two.this_node]) == 0
+
     assert len(wire.messages) >= kademlia.k_bucket_size
     msg = wire.messages.pop(0)
     assert msg[1] == 'find_node'
