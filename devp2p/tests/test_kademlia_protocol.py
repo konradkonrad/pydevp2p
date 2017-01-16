@@ -559,10 +559,23 @@ def test_many(protos):
     wire = bootstrap.wire
 
     # bootstrap
-    for num, p in enumerate(protos[1:]):
-        print("bootstrapping {i} {node}".format(i=num, node=p.this_node))
-        p.bootstrap([bootstrap.this_node])
-        wire.process(protos)  # successively add nodes
+    for num, proto in enumerate(protos[1:]):
+        print("bootstrapping {i} {node}".format(i=num, node=proto.this_node))
+        assert len(wire.messages) == 0
+        # we need to reset bonding properties since we are dealing with global
+        # objects
+        bootstrap.this_node.ping_recv = False
+        bootstrap.this_node.pong_recv = False
+        proto.bootstrap([bootstrap.this_node])
+        # bootstrap node must be pinged
+        assert wire.process_single(bootstrap.this_node, protos)[0] == 'ping'
+        messages = wire.process(protos, collect=True)  # successively add nodes
+        assert len(messages)
+        assert [m[0] for m in messages[:5]] == ['ping', 'pong', 'pong', 'find_node', 'neighbours']
+        assert bootstrap.this_node in proto.routing
+        assert bootstrap.routing.get_node(proto.this_node).bonded
+        assert proto.routing.get_node(bootstrap.this_node).bonded
+    assert len(wire.messages) == 0
 
     # now everbody does a find node to fill the buckets
     for p in protos[1:]:
