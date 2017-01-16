@@ -60,6 +60,8 @@ class WireMock(kademlia.WireInterface):
         """
         process messages until none are left
         or if process steps messages if steps >0
+
+        also yields all messages for asserting
         """
         i = 0
         proto_by_node = dict((p.this_node, p) for p in kademlia_protocols)
@@ -70,6 +72,7 @@ class WireMock(kademlia.WireInterface):
             cmd = 'recv_' + msg[1]
             getattr(target, cmd)(*msg[2:])
             i += 1
+            yield msg[1:]
             if steps and i == steps:
                 return  # messages may be left
         assert not self.messages
