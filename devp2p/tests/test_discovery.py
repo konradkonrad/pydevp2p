@@ -119,6 +119,7 @@ def test_ping_pong():
     alice = NodeDiscoveryMock(host='127.0.0.1', port=1, seed='alice')
     bob = NodeDiscoveryMock(host='127.0.0.2', port=2, seed='bob')
 
+    cmd_id_map = alice.protocol.cmd_id_map
     bob_node = alice.protocol.get_node(bob.protocol.pubkey, bob.address)
     alice.protocol.kademlia.ping(bob_node)
     assert len(NodeDiscoveryMock.messages) == 1
@@ -126,9 +127,12 @@ def test_ping_pong():
     msg = NodeDiscoveryMock.messages[0][2]
     remote_pubkey, cmd_id, payload, mdc = bob.protocol.unpack(msg)
     assert cmd_id == alice.protocol.cmd_id_map['ping']
-    bob.poll()  # receives ping, sends pong
-    assert len(NodeDiscoveryMock.messages) == 1
-    alice.poll()  # receives pong
+    # process the ping pong handshake
+    assert bob.poll() == cmd_id_map['ping']  # receives ping, sends pong
+    assert len(NodeDiscoveryMock.messages) == 2
+    assert alice.poll() == cmd_id_map['ping']  # receives ping, sends pong
+    assert bob.poll() == cmd_id_map['pong']  # receives pong
+    assert alice.poll() == cmd_id_map['pong']  # receives pong
     assert len(NodeDiscoveryMock.messages) == 0
 
 
