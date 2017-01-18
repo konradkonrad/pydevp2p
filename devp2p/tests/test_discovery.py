@@ -82,11 +82,16 @@ class NodeDiscoveryMock(object):
         self.protocol.receive(address, message)
 
     def poll(self):
+        """try to receive a message
+        Returns:
+            cmd_id: the command id of the received message
+        """
         # try to receive a message
         for i, (to_address, from_address, message) in enumerate(self.messages):
             if to_address == self.address:
                 del self.messages[i]
                 self.receive(from_address, message)
+                return self.protocol.unpack(message)[1]
 
 
 def test_packing():
