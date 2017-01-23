@@ -209,13 +209,7 @@ class KBucket(object):
         raise Exception
 
     def get_node(self, node):
-        if node in self:
-            for n in self.nodes:
-                if n.id == node.id:
-                    return node
-            # should never happen
-            assert False
-        return None
+        return ([n for n in self.nodes if n.id == node.id] or [None])[0]
 
     def __contains__(self, node):
         return node in self.nodes
